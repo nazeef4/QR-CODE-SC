@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SCQR Console — Company administration</title>
+<link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">◈</span>
+    <span>SCQR Console<small>Hierarchy · entities · alerts · audit</small></span>
+  </div>
+  <nav class="links">
+    <a href="/">Scan page</a>
+    <a href="/admin" class="active">Console</a>
+    <a href="/api/v1/docs" target="_blank">API</a>
+    <a href="#" id="logout" class="hidden">Log out</a>
+  </nav>
+</header>
+
+<main>
+  <!-- ======================= LOGIN ======================= -->
+  <section id="viewLogin" style="max-width:440px;margin:40px auto">
+    <div class="card">
+      <h2>Sign in</h2>
+      <p class="muted" style="font-size:13px">No account yet? <a href="#" id="gotoOnboard">Onboard your company</a></p>
+      <label>Email</label><input id="loginEmail" type="email" placeholder="admin@company.example" />
+      <label>Password</label><input id="loginPassword" type="password" />
+      <div style="margin-top:14px"><button id="btnLogin" style="width:100%">Sign in</button></div>
+      <p id="loginErr" class="muted" style="color:var(--red);font-size:13px"></p>
+    </div>
+
+    <div class="card" id="onboardCard" style="display:none">
+      <h2>Company onboarding</h2>
+      <p class="muted" style="font-size:13px">Creates the tenant, admin account, Ed25519 signing keys and the initial supply-chain hierarchy.</p>
+      <label>Company name</label><input id="obName" placeholder="Aurora Pharmaceuticals" />
+      <label>Admin email</label><input id="obEmail" type="email" />
+      <label>Admin password</label><input id="obPassword" type="password" />
+      <label>Hierarchy template</label>
+      <select id="obTemplate"></select>
+      <div style="margin-top:14px"><button id="btnOnboard" style="width:100%">Create company</button></div>
+      <p id="obErr" class="muted" style="color:var(--red);font-size:13px"></p>
+    </div>
+  </section>
+
+  <!-- ======================= APP ======================= -->
+  <section id="viewApp" class="hidden">
+    <h1 id="coName">Company</h1>
+    <p class="sub">Signed identities, configurable hierarchies, clone detection — everything in one tenant.</p>
+
+    <div class="tabs" id="tabs">
+      <button data-tab="overview" class="active">Overview</button>
+      <button data-tab="entities">Entities</button>
+      <button data-tab="hierarchy">Hierarchy</button>
+      <button data-tab="alerts">Alerts &amp; scans</button>
+      <button data-tab="audit">Audit chain</button>
+      <button data-tab="users">Users</button>
+    </div>
+
+    <!-- overview -->
+    <div class="card tab" id="tab-overview">
+      <h2>Overview</h2>
+      <div class="stats" id="stats"></div>
+      <h2 style="margin-top:18px">Entity types</h2>
+      <div id="typeBreakdown" class="muted"></div>
+    </div>
+
+    <!-- entities -->
+    <div class="card tab hidden" id="tab-entities">
+      <div class="row" style="align-items:flex-start">
+        <div>
+          <h2>Registered entities</h2>
+          <div class="row" style="margin-bottom:10px">
+            <select id="filterType"><option value="">all types</option></select>
+            <input id="filterSerial" placeholder="serial contains…" />
+            <button class="ghost" id="btnFilter" style="flex:0 0 auto">Filter</button>
+          </div>
+          <table>
+            <thead><tr><th>Type</th><th>Serial</th><th>State</th><th>Parent</th><th></th></tr></thead>
+            <tbody id="entityRows"></tbody>
+          </table>
+        </div>
+        <div style="flex:0 0 330px">
+          <h2>Register entity</h2>
+          <label>Type</label><select id="regType"></select>
+          <label>Serial</label><input id="regSerial" placeholder="SN-… (required for object types)" />
+          <label>Parent ID (optional — binds now, signed)</label><input id="regParent" placeholder="ent_…" />
+          <label>Attributes (JSON)</label><textarea id="regAttrs" rows="3">{}</textarea>
+          <div style="margin-top:12px"><button id="btnRegister" style="width:100%">Register + issue QR</button></div>
+          <p class="muted" style="font-size:12.5px">Registration records an append-only audit entry and issues the signed <span class="mono">SCQR1</span> payload.</p>
+        </div>
+      </div>
+
+      <div id="entityDetail" class="hidden" style="margin-top:20px;border-top:1px solid var(--line);padding-top:16px">
+        <div class="row">
+          <div>
+            <h2 id="edTitle">Entity</h2>
+            <div class="kv" id="edKv"></div>
+            <label>Bind to parent (signed relationship)</label>
+            <div class="row">
+              <input id="bindParent" placeholder="parent entity id" />
+              <button id="btnBind" style="flex:0 0 auto">Bind</button>
+            </div>
+            <label>Re-parent (org_admin only — audited unbind)</label>
+            <div class="row">
+              <input id="rebindParent" placeholder="new parent id" />
+              <button class="danger" id="btnRebind" style="flex:0 0 auto">Unbind+bind</button>
+            </div>
+            <label>Lifecycle transition</label>
+            <div class="row">
+              <select id="transState"></select>
+              <button id="btnTrans" style="flex:0 0 auto">Apply</button>
+            </div>
+            <div class="row" style="margin-top:12px">
+              <button class="ghost" id="btnLineage">Show lineage</button>
+              <button class="ghost" id="btnReissue">Re-issue payload (seq++)</button>
+            </div>
+            <pre id="edLineage" class="mono" style="white-space:pre-wrap;font-size:12px;color:var(--muted)"></pre>
+          </div>
+          <div style="text-align:center">
+            <div class="qrbox"><img id="edQr" alt="QR" /></div>
+            <div class="mono" id="edPayload" style="font-size:11px;word-break:break-all;color:var(--muted);margin-top:8px"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- hierarchy -->
+    <div class="card tab hidden" id="tab-hierarchy">
+      <h2>Supply-chain hierarchy schema <span class="badge blue" id="schemaVer"></span></h2>
+      <p class="muted" style="font-size:13px">Entity types and allowed parent→child relations. Publishing validates the definition and creates a new immutable version; existing entities keep their schema.</p>
+      <textarea id="schemaJson" rows="22"></textarea>
+      <div class="row" style="margin-top:10px">
+        <button id="btnPublish">Publish new version</button>
+        <button class="ghost" id="btnSchemaReload">Reload</button>
+      </div>
+      <div id="schemaErr" class="muted" style="color:var(--red);font-size:13px"></div>
+      <h2 style="margin-top:16px">Signing keys</h2>
+      <div class="row">
+        <button class="ghost small" data-rotate="entity_qr">Rotate entity_qr key</button>
+        <button class="ghost small" data-rotate="relationship">Rotate relationship key</button>
+      </div>
+      <table style="margin-top:10px"><thead><tr><th>kid</th><th>purpose</th><th>created</th><th>state</th></tr></thead>
+      <tbody id="keyRows"></tbody></table>
+    </div>
+
+    <!-- alerts -->
+    <div class="card tab hidden" id="tab-alerts">
+      <h2>Suspicious / invalid scans</h2>
+      <table>
+        <thead><tr><th>Time</th><th>Verdict</th><th>Risk</th><th>Entity</th><th>Flags</th><th>Geo</th></tr></thead>
+        <tbody id="alertRows"></tbody>
+      </table>
+      <h2 style="margin-top:18px">Recent scan history</h2>
+      <table>
+        <thead><tr><th>Time</th><th>Verdict</th><th>Risk</th><th>Entity</th><th>First</th></tr></thead>
+        <tbody id="scanRows"></tbody>
+      </table>
+    </div>
+
+    <!-- audit -->
+    <div class="card tab hidden" id="tab-audit">
+      <h2>Hash-chained audit log <span class="badge" id="chainBadge">…</span></h2>
+      <p class="muted" style="font-size:13px">Each row hash covers the previous row — tamper-evident without a blockchain. <span id="chainHead" class="mono"></span></p>
+      <table>
+        <thead><tr><th>#</th><th>Time</th><th>Actor</th><th>Action</th><th>Subject</th><th>row hash</th></tr></thead>
+        <tbody id="auditRows"></tbody>
+      </table>
+    </div>
+
+    <!-- users -->
+    <div class="card tab hidden" id="tab-users">
+      <h2>Create user</h2>
+      <div class="row">
+        <input id="uEmail" placeholder="email@company.example" />
+        <input id="uPass" type="password" placeholder="password" />
+        <select id="uRole">
+          <option value="operator">operator</option>
+          <option value="distributor">distributor</option>
+          <option value="retailer">retailer</option>
+          <option value="auditor">auditor</option>
+          <option value="org_admin">org_admin</option>
+        </select>
+        <button id="btnCreateUser" style="flex:0 0 auto">Create</button>
+      </div>
+      <p id="userMsg" class="muted" style="font-size:13px"></p>
+      <p class="muted" style="font-size:13px">Roles: <span class="mono">org_admin</span> full control · <span class="mono">operator</span> register/bind/print · <span class="mono">distributor</span>/<span class="mono">retailer</span> events &amp; transitions · <span class="mono">auditor</span> read-only + audit chain.</p>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const state = { token: localStorage.getItem("scqr_token"), cid: localStorage.getItem("scqr_cid"), role: localStorage.getItem("scqr_role"), schema: null, entity: null };
+
+function hdrs(json) {
+  const h = { Authorization: "Bearer " + state.token };
+  if (json) h["Content-Type"] = "application/json";
+  return h;
+}
+async function api(path, opts = {}) {
+  const r = await fetch(path, opts);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail || r.status));
+  return data;
+}
+let toastTimer;
+function toast(msg, err) {
+  document.querySelectorAll(".toast").forEach((t) => t.remove());
+  const el = document.createElement("div");
+  el.className = "toast" + (err ? " err" : "");
+  el.textContent = msg;
+  document.body.appendChild(el);
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => el.remove(), 4000);
+}
+
+/* ---------------- auth ---------------- */
+async function boot() {
+  if (state.token) {
+    try {
+      const me = await api("/api/v1/auth/me", { headers: hdrs() });
+      state.role = me.role;
+      showApp();
+      return;
+    } catch (e) { /* fall through to login */ }
+  }
+  $("#viewLogin").classList.remove("hidden");
+  $("#viewApp").classList.add("hidden");
+}
+
+async function loadTemplates() {
+  const t = await api("/api/v1/templates");
+  $("#obTemplate").innerHTML = t.map((x) => `<option value="${x.name}">${x.name}</option>`).join("");
+}
+
+$("#gotoOnboard").addEventListener("click", async (e) => {
+  e.preventDefault();
+  $("#onboardCard").style.display = "block";
+  await loadTemplates();
+});
+
+$("#btnLogin").addEventListener("click", async () => {
+  try {
+    const d = await api("/api/v1/auth/login", {
+      method: "POST", headers: hdrs(true),
+      body: JSON.stringify({ email: $("#loginEmail").value, password: $("#loginPassword").value }),
+    });
+    state.token = d.access_token; state.cid = d.company_id; state.role = d.role;
+    localStorage.setItem("scqr_token", d.access_token);
+    localStorage.setItem("scqr_cid", d.company_id);
+    localStorage.setItem("scqr_role", d.role);
+    showApp();
+  } catch (e) { $("#loginErr").textContent = e.message; }
+});
+
+$("#btnOnboard").addEventListener("click", async () => {
+  try {
+    const d = await api("/api/v1/onboarding/company", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        company_name: $("#obName").value,
+        admin: { email: $("#obEmail").value, password: $("#obPassword").value, name: "Admin" },
+        template: $("#obTemplate").value,
+      }),
+    });
+    state.token = d.access_token; state.cid = d.company_id; state.role = "org_admin";
+    localStorage.setItem("scqr_token", d.access_token);
+    localStorage.setItem("scqr_cid", d.company_id);
+    localStorage.setItem("scqr_role", "org_admin");
+    showApp();
+  } catch (e) { $("#obErr").textContent = e.message; }
+});
+
+$("#logout").addEventListener("click", (e) => {
+  e.preventDefault();
+  ["scqr_token", "scqr_cid", "scqr_role"].forEach((k) => localStorage.removeItem(k));
+  location.reload();
+});
+
+/* ---------------- tabs ---------------- */
+$("#tabs").addEventListener("click", async (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  document.querySelectorAll("#tabs button").forEach((x) => x.classList.toggle("active", x === b));
+  document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("hidden", t.id !== "tab-" + b.dataset.tab));
+  const loaders = { overview: loadStats, entities: loadEntities, hierarchy: loadSchema, alerts: loadAlerts, audit: loadAudit };
+  loaders[b.dataset.tab]?.();
+});
+
+/* ---------------- data loaders ---------------- */
+async function loadStats() {
+  const s = await api(`/api/v1/companies/${state.cid}/stats`, { headers: hdrs() });
+  $("#stats").innerHTML = [
+    ["Entities", s.entities_total], ["Scans", s.scans_total],
+    ["Alerts", s.alerts], ["Events", s.events_total],
+    ["Authentic", s.scans_by_verdict.authentic || 0],
+    ["Suspicious", s.scans_by_verdict.suspicious || 0],
+    ["Invalid", s.scans_by_verdict.invalid || 0],
+  ].map(([l, n]) => `<div class="stat"><div class="n">${n}</div><div class="l">${l}</div></div>`).join("");
+  $("#typeBreakdown").innerHTML = Object.entries(s.entities_by_type)
+    .map(([t, n]) => `<span class="badge blue" style="margin:3px">${t}: ${n}</span>`).join(" ");
+}
+
+async function ensureSchema() {
+  if (state.schema) return state.schema;
+  state.schema = await api(`/api/v1/companies/${state.cid}/schema`, { headers: hdrs() });
+  return state.schema;
+}
+
+async function loadEntities() {
+  const schema = await ensureSchema();
+  const types = Object.keys(schema.definition.entity_types);
+  $("#filterType").innerHTML = `<option value="">all types</option>` + types.map((t) => `<option>${t}</option>`).join("");
+  if (!$("#regType").dataset.ready) {
+    $("#regType").innerHTML = types.map((t) => `<option>${t}</option>`).join("");
+    $("#regType").dataset.ready = "1";
+  }
+  const q = new URLSearchParams();
+  if ($("#filterType").value) q.set("entity_type", $("#filterType").value);
+  if ($("#filterSerial").value) q.set("serial", $("#filterSerial").value);
+  const d = await api(`/api/v1/entities?${q}`, { headers: hdrs() });
+  $("#entityRows").innerHTML = d.items.map((e) => `
+    <tr>
+      <td>${e.entity_type}</td><td class="mono">${e.serial || "—"}</td>
+      <td><span class="badge ${e.lifecycle_state === "recalled" ? "red" : "green"}">${e.lifecycle_state}</span></td>
+      <td class="mono">${e.parent_id ? e.parent_id.slice(0, 14) + "…" : "—"}</td>
+      <td><button class="small ghost" data-open="${e.id}">open</button></td>
+    </tr>`).join("") || `<tr><td colspan="5" class="muted">No entities yet.</td></tr>`;
+}
+
+$("#btnFilter").addEventListener("click", loadEntities);
+$("#entityRows").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-open]"); if (b) openEntity(b.dataset.open);
+});
+
+async function openEntity(id) {
+  const e = await api(`/api/v1/entities/${id}`, { headers: hdrs() });
+  state.entity = e;
+  $("#entityDetail").classList.remove("hidden");
+  $("#edTitle").textContent = `${e.entity_type} · ${e.serial || e.id}`;
+  $("#edKv").innerHTML = `
+    <div class="k">id</div><div class="v">${e.id}</div>
+    <div class="k">state</div><div class="v">${e.lifecycle_state}</div>
+    <div class="k">parent</div><div class="v">${e.parent_id || "—"}</div>
+    <div class="k">payload seq</div><div class="v">${e.payload_seq}</div>
+    <div class="k">activated</div><div class="v">${e.activated_at || "not yet scanned"}</div>
+    <div class="k">attributes</div><div class="v">${JSON.stringify(e.attributes)}</div>
+    <div class="k">children</div><div class="v">${e.children_count}</div>`;
+  $("#transState").innerHTML = e.lifecycle_states.map((s) =>
+    `<option ${s === e.lifecycle_state ? "selected" : ""}>${s}</option>`).join("");
+  const blob = await fetch(`/api/v1/entities/${id}/qr.png?size=360`, { headers: hdrs() }).then((r) => r.blob());
+  $("#edQr").src = URL.createObjectURL(blob);
+  $("#edPayload").textContent = (await api(`/api/v1/entities/${id}/payload`, { headers: hdrs() })).payload;
+  $("#edLineage").textContent = "";
+}
+
+$("#btnRegister").addEventListener("click", async () => {
+  try {
+    let attrs = {}; try { attrs = JSON.parse($("#regAttrs").value || "{}"); } catch { throw new Error("attributes must be valid JSON"); }
+    const body = { entity_type: $("#regType").value, serial: $("#regSerial").value || null, attributes: attrs };
+    if ($("#regParent").value.trim()) body.parent_id = $("#regParent").value.trim();
+    const d = await api("/api/v1/entities", { method: "POST", headers: hdrs(true), body: JSON.stringify(body) });
+    toast(`Registered ${d.entity_type} ${d.serial || d.id}`);
+    loadEntities(); openEntity(d.id);
+  } catch (e) { toast(e.message, true); }
+});
+
+$("#btnBind").addEventListener("click", async () => {
+  try {
+    await api(`/api/v1/entities/${state.entity.id}/bindings`, {
+      method: "POST", headers: hdrs(true),
+      body: JSON.stringify({ parent_id: $("#bindParent").value.trim() }),
+    });
+    toast("Bound — signed relationship statement written");
+    openEntity(state.entity.id); loadEntities();
+  } catch (e) { toast(e.message, true); }
+});
+
+$("#btnRebind").addEventListener("click", async () => {
+  try {
+    await api(`/api/v1/entities/${state.entity.id}/bindings/current`, { method: "DELETE", headers: hdrs() });
+    await api(`/api/v1/entities/${state.entity.id}/bindings`, {
+      method: "POST", headers: hdrs(true),
+      body: JSON.stringify({ parent_id: $("#rebindParent").value.trim() }),
+    });
+    toast("Re-parented (unbind+bind audited). Re-issue the QR to embed the new parent.");
+    openEntity(state.entity.id);
+  } catch (e) { toast(e.message, true); }
+});
+
+$("#btnTrans").addEventListener("click", async () => {
+  try {
+    await api(`/api/v1/entities/${state.entity.id}/transitions`, {
+      method: "POST", headers: hdrs(true), body: JSON.stringify({ to_state: $("#transState").value }),
+    });
+    toast("Lifecycle updated"); openEntity(state.entity.id);
+  } catch (e) { toast(e.message, true); }
+});
+
+$("#btnReissue").addEventListener("click", async () => {
+  try {
+    const d = await api(`/api/v1/entities/${state.entity.id}/reissue`, { method: "POST", headers: hdrs() });
+    toast("Re-issued at seq " + d.payload_seq);
+    openEntity(state.entity.id);
+  } catch (e) { toast(e.message, true); }
+});
+
+$("#btnLineage").addEventListener("click", async () => {
+  try {
+    const d = await api(`/api/v1/entities/${state.entity.id}/lineage?max_descendant_depth=5`, { headers: hdrs() });
+    const up = d.direction_up;
+    const lines = [`UP (chain_verified=${up.chain_verified}): ${[d.scanned_node.entity_type, ...up.ancestors.map((a) => a.entity_type)].join(" → ")}`];
+    up.hops.forEach((h) => lines.push(`  hop ${h.child_id.slice(0,10)} → ${String(h.parent_id).slice(0,10)}  sig=${h.signature_valid} current=${h.is_current_binding}`));
+    const walk = (n, d0) => { lines.push("  ".repeat(d0) + `DOWN: ${n.type} ${n.serial || n.id.slice(0,8)}`); (n.children || []).forEach((c) => walk(c, d0 + 1)); };
+    walk(d.direction_down.tree, 0);
+    $("#edLineage").textContent = lines.join("\n");
+  } catch (e) { toast(e.message, true); }
+});
+
+/* ---------------- schema ---------------- */
+async function loadSchema() {
+  state.schema = await api(`/api/v1/companies/${state.cid}/schema`, { headers: hdrs() });
+  $("#schemaVer").textContent = `v${state.schema.version} · ${state.schema.name}`;
+  $("#schemaJson").value = JSON.stringify(state.schema.definition, null, 2);
+  const keys = await api(`/api/v1/companies/${state.cid}/keys`, { headers: hdrs() });
+  $("#keyRows").innerHTML = keys.map((k) => `
+    <tr><td class="mono">${k.kid}</td><td>${k.purpose}</td><td>${(k.created_at || "").slice(0, 19)}</td>
+    <td>${k.revoked_at ? '<span class="badge red">revoked</span>' : '<span class="badge green">active</span>'}</td></tr>`).join("");
+}
+$("#btnSchemaReload").addEventListener("click", loadSchema);
+$("#btnPublish").addEventListener("click", async () => {
+  $("#schemaErr").textContent = "";
+  try {
+    const def = JSON.parse($("#schemaJson").value);
+    const d = await api(`/api/v1/companies/${state.cid}/schema`, {
+      method: "PUT", headers: hdrs(true),
+      body: JSON.stringify({ name: state.schema.name === "custom" ? "custom" : state.schema.name + "-edited", definition: def }),
+    });
+    toast("Published schema v" + d.version);
+    state.schema = null; loadSchema();
+  } catch (e) { $("#schemaErr").textContent = e.message; }
+});
+document.querySelectorAll("[data-rotate]").forEach((b) =>
+  b.addEventListener("click", async () => {
+    try {
+      const d = await api(`/api/v1/companies/${state.cid}/keys/rotate?purpose=${b.dataset.rotate}`, { method: "POST", headers: hdrs() });
+      toast("Rotated → " + d.kid); loadSchema();
+    } catch (e) { toast(e.message, true); }
+  }));
+
+/* ---------------- alerts / audit / users ---------------- */
+async function loadAlerts() {
+  const alerts = await api(`/api/v1/companies/${state.cid}/alerts`, { headers: hdrs() });
+  $("#alertRows").innerHTML = alerts.map((a) => `
+    <tr><td>${a.ts.slice(0, 19).replace("T", " ")}</td>
+    <td><span class="badge ${a.verdict === "invalid" ? "red" : "amber"}">${a.verdict}</span></td>
+    <td>${a.risk_score}</td><td class="mono">${(a.entity_id || "—").slice(0, 16)}</td>
+    <td>${a.flags.map((f) => f.code).join(", ") || "—"}</td>
+    <td class="mono">${a.country || "—"} ${a.lat != null ? a.lat + "," + a.lon : ""}</td></tr>`).join("")
+    || `<tr><td colspan="6" class="muted">No alerts — quiet so far.</td></tr>`;
+  const scans = await api(`/api/v1/scans?limit=25`, { headers: hdrs() });
+  $("#scanRows").innerHTML = scans.items.map((s) => `
+    <tr><td>${s.ts.slice(0, 19).replace("T", " ")}</td>
+    <td><span class="badge ${s.verdict === "authentic" ? "green" : s.verdict === "invalid" ? "red" : "amber"}">${s.verdict}</span></td>
+    <td>${s.risk_score}</td><td class="mono">${(s.entity_id || "—").slice(0, 16)}</td>
+    <td>${s.is_first_scan ? "★ first" : ""}</td></tr>`).join("");
+}
+
+async function loadAudit() {
+  const d = await api(`/api/v1/companies/${state.cid}/audit?limit=150`, { headers: hdrs() });
+  const badge = $("#chainBadge");
+  badge.textContent = d.chain.ok ? `verified · ${d.chain.rows} rows` : `BROKEN at row ${d.chain.broken_at}`;
+  badge.className = "badge " + (d.chain.ok ? "green" : "red");
+  $("#chainHead").textContent = d.chain.head ? "head: " + d.chain.head.slice(0, 32) + "…" : "";
+  $("#auditRows").innerHTML = d.entries.map((e) => `
+    <tr><td>${e.id}</td><td>${e.ts.replace("T", " ").slice(0, 19)}</td>
+    <td class="mono">${(e.actor_id || "system").slice(0, 12)} <span class="muted">(${e.actor_role || "-"})</span></td>
+    <td>${e.action}</td><td class="mono">${e.subject_type}/${String(e.subject_id).slice(0, 14)}</td>
+    <td class="mono muted">${e.row_hash.slice(0, 16)}…</td></tr>`).join("");
+}
+
+$("#btnCreateUser").addEventListener("click", async () => {
+  try {
+    await api("/api/v1/auth/users", {
+      method: "POST", headers: hdrs(true),
+      body: JSON.stringify({ email: $("#uEmail").value, password: $("#uPass").value, role: $("#uRole").value, name: $("#uRole").value }),
+    });
+    $("#userMsg").textContent = "Created " + $("#uEmail").value + " (" + $("#uRole").value + ")";
+  } catch (e) { $("#userMsg").textContent = e.message; $("#userMsg").style.color = "var(--red)"; }
+});
+
+/* ---------------- show app ---------------- */
+async function showApp() {
+  $("#viewLogin").classList.add("hidden");
+  $("#viewApp").classList.remove("hidden");
+  $("#logout").classList.remove("hidden");
+  try {
+    const schema = await ensureSchema();
+    $("#coName").textContent = `Company console — schema “${schema.name}” v${schema.version}`;
+    loadStats();
+  } catch (e) { toast(e.message, true); }
+}
+
+boot();
+</script>
+</body>
+</html>

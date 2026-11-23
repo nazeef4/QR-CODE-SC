@@ -1,0 +1,13 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Runtime data (tenant DBs, key material, cached QR renders)
+data/
+output/
+
+# Editor/OS
+.DS_Store
+*.swp

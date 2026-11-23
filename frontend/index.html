@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SCQR Verify — Scan &amp; Trace</title>
+<link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">◈</span>
+    <span>SCQR Verify<small>Cryptographically secured traceability</small></span>
+  </div>
+  <nav class="links">
+    <a href="/" class="active">Scan</a>
+    <a href="/admin">Company console</a>
+    <a href="/api/v1/docs" target="_blank">API</a>
+  </nav>
+</header>
+
+<main>
+  <h1>Verify a product</h1>
+  <p class="sub">Point your camera at a supply-chain QR code, or paste its <span class="mono">SCQR1…</span> payload.
+     Every result is checked cryptographically against the issuer's Ed25519 key and re-verified against the signed parent-child hierarchy.</p>
+
+  <div class="grid2">
+    <section class="card">
+      <h2>Camera</h2>
+      <div class="viewport">
+        <video id="video" playsinline muted class="hidden"></video>
+        <canvas id="canvas" class="hidden"></canvas>
+        <div class="hint" id="hint">Camera idle.<br/>Press “Start camera” and frame the QR code.</div>
+        <div class="reticle hidden" id="reticle"></div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button id="btnCam">Start camera</button>
+        <button class="ghost" id="btnGeo">Share my location: <b id="geoState">off</b></button>
+      </div>
+
+      <label>Paste payload manually (fallback)</label>
+      <textarea id="manual" rows="3" placeholder="SCQR1.eyJ2IjoxLC…​.3Qv8…"></textarea>
+      <div class="row" style="margin-top:10px">
+        <button class="ghost" id="btnManual">Verify pasted payload</button>
+      </div>
+      <p class="muted" style="font-size:12.5px;margin-top:10px">
+        Demo payload from <span class="mono">output/qr_manifest.json</span> can be pasted here.
+      </p>
+    </section>
+
+    <section class="card" id="resultCard">
+      <h2>Verification result</h2>
+      <div id="result"><p class="muted">No scan yet.</p></div>
+    </section>
+  </div>
+
+  <section class="card hidden" id="detailCard">
+    <h2>Verified supply-chain journey</h2>
+    <div id="details"></div>
+  </section>
+</main>
+
+<script src="/static/vendor/jsQR.js"></script>
+<script>
+const $ = (s) => document.querySelector(s);
+let stream = null, rafId = null, busy = false;
+let geoOn = false;
+const deviceFp = localStorage.getItem("scqr_fp") ||
+  (crypto.randomUUID(), localStorage.setItem("scqr_fp", crypto.randomUUID()), localStorage.getItem("scqr_fp"));
+
+async function postScan(payload, ctx) {
+  const r = await fetch("/api/v1/scans", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ payload, context: ctx }),
+  });
+  if (!r.ok) throw new Error("Scan endpoint error " + r.status);
+  return r.json();
+}
+
+function geoCtx() {
+  const ctx = { device_fp: deviceFp };
+  if (geoOn && navigator.geoCtxFix) Object.assign(ctx, navigator.geoCtxFix);
+  return ctx;
+}
+
+function verdictBanner(res) {
+  const map = {
+    authentic: ["✅", "Authentic", "Signature valid · hierarchy verified · no anomalies"],
+    suspicious: ["⚠️", "Suspicious", "Identity checks passed, but behavioural anomalies were detected"],
+    invalid: ["⛔", "Invalid", "This code failed cryptographic verification"],
+    revoked: ["🚫", "Revoked", "This entity was revoked by the issuer"],
+  };
+  const [icon, title, sub] = map[res.verdict] || ["❓", res.verdict, ""];
+  return `<div class="verdict ${res.verdict}">
+      <div class="icon">${icon}</div>
+      <div><div class="title">${title} <span class="badge" style="margin-left:8px">risk ${res.risk_score}/100</span></div>
+      <div class="sub">${sub}</div></div>
+    </div>`;
+}
+
+function chainHtml(res) {
+  if (!res.entity) return "";
+  const hops = res.relationships?.hops || [];
+  const up = [];
+  if (res.origin?.batch) {
+    up.push({ type: "batch", serial: res.origin.batch.serial, ok: true });
+    if (res.origin.manufacturer) up.push({ type: "manufacturer", serial: res.origin.manufacturer.name || "—", ok: true });
+  }
+  const parts = [`<span class="node verified"><span class="t">${res.entity.type}</span> ${res.entity.serial || res.entity.id.slice(0,10)}</span>`];
+  if (res.relationships?.current_parent_id && hops.length) {
+    parts.push(`<span class="arrow">→</span>`);
+    hops.forEach((h, i) => {
+      const node = `<span class="node ${h.verified ? "verified" : "unverified"}">
+        <span class="t">${h.parent_type || "parent"}</span>
+        ${h.parent_id.slice(0, 12)}… ${h.verified ? "✓" : "✗"}</span>`;
+      parts.push(node);
+      if (i < hops.length - 1) parts.push(`<span class="arrow">→</span>`);
+    });
+  }
+  return `<div class="chain">${parts.join("")}</div>
+    <p class="muted" style="font-size:13px">
+      ${res.relationships?.chain_verified
+        ? "Every hop's signed binding statement verified ✓"
+        : res.entity ? "⚠ Hierarchy could not be fully verified" : ""}
+      ${res.origin?.manufacturer?.name ? "<br/>Origin manufacturer: <b style='color:var(--text)'>" + res.origin.manufacturer.name + "</b>" : ""}
+    </p>`;
+}
+
+function render(res) {
+  $("#result").innerHTML = verdictBanner(res) +
+    (res.flags?.length
+      ? res.flags.map((f) => `<div class="flag ${f.severity}"><b>[${f.severity}] ${f.code}</b><span>${f.detail}</span></div>`).join("")
+      : `<p class="muted" style="font-size:13px">No risk flags.</p>`) +
+    (res.entity
+      ? `<div class="kv" style="margin-top:12px">
+          <div class="k">Entity</div><div class="v">${res.entity.type} · ${res.entity.serial || res.entity.id}</div>
+          <div class="k">Lifecycle</div><div class="v">${res.entity.lifecycle_state}</div>
+          <div class="k">First activation</div><div class="v">${res.entity.activated_at || "—"}</div>
+          <div class="k">Signature</div><div class="v">${res.authenticity.signature_valid ? "valid (kid " + res.authenticity.kid + ")" : "FAILED"}</div>
+          <div class="k">Scans</div><div class="v">${res.activation?.scan_count || 1} total${res.activation?.previously_activated ? " — previously activated " + res.activation.first_scan_at : " — first scan"}</div>
+        </div>`
+      : `<p class="muted">Unknown entity — no further data to show.</p>`);
+
+  if (res.entity) {
+    $("#detailCard").classList.remove("hidden");
+    $("#details").innerHTML =
+      chainHtml(res) +
+      (res.journey?.length
+        ? `<div class="timeline">${res.journey.map((e) => `
+            <div class="ev"><div class="what">${e.event_type}</div>
+            <div class="when">${e.ts}${e.location ? " · " + e.location : ""}</div>
+            <div class="muted" style="font-size:13px">${typeof e.details === "string" ? JSON.stringify(e.details) : Object.entries(e.details || {}).map(([k,v]) => k + ": " + v).join(" · ")}</div></div>`).join("")}</div>`
+        : `<p class="muted">No supply-chain events recorded yet.</p>`);
+  } else {
+    $("#detailCard").classList.add("hidden");
+  }
+}
+
+async function handlePayload(payload) {
+  if (!payload || busy) return;
+  busy = true;
+  $("#result").innerHTML = `<p class="muted">Verifying…</p>`;
+  try {
+    const res = await postScan(payload, geoCtx());
+    render(res);
+  } catch (e) {
+    $("#result").innerHTML = `<p class="flag critical">${e.message}</p>`;
+  } finally {
+    busy = false;
+  }
+}
+
+/* ---- camera loop ------------------------------------------------------ */
+async function startCam() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+  } catch (e) {
+    toast("Camera unavailable (" + e.message + ") — paste the payload instead.", true);
+    return;
+  }
+  const video = $("#video"), canvas = $("#canvas"), ctx = canvas.getContext("2d", { willReadFrequently: true });
+  video.srcObject = stream;
+  await video.play();
+  video.classList.remove("hidden");
+  $("#hint").classList.add("hidden");
+  $("#reticle").classList.remove("hidden");
+  $("#btnCam").textContent = "Stop camera";
+
+  const tick = () => {
+    if (!stream) return;
+    if (video.readyState === video.HAVE_ENOUGH_DATA) {
+      canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const code = window.jsQR ? jsQR(img.data, img.width, img.height, { inversionAttempts: "dontInvert" }) : null;
+      if (code && code.data && code.data.startsWith("SCQR1")) {
+        stopCam();
+        handlePayload(code.data);
+        return;
+      }
+    }
+    rafId = requestAnimationFrame(tick);
+  };
+  rafId = requestAnimationFrame(tick);
+}
+
+function stopCam() {
+  if (rafId) cancelAnimationFrame(rafId);
+  if (stream) stream.getTracks().forEach((t) => t.stop());
+  stream = null;
+  $("#video").classList.add("hidden");
+  $("#hint").classList.remove("hidden");
+  $("#reticle").classList.add("hidden");
+  $("#btnCam").textContent = "Start camera";
+}
+
+$("#btnCam").addEventListener("click", () => (stream ? stopCam() : startCam()));
+$("#btnManual").addEventListener("click", () => handlePayload($("#manual").value.trim()));
+$("#btnGeo").addEventListener("click", () => {
+  if (geoOn) { geoOn = false; $("#geoState").textContent = "off"; return; }
+  navigator.geolocation?.getCurrentPosition(
+    (pos) => {
+      navigator.geoCtxFix = { lat: +pos.coords.latitude.toFixed(5), lon: +pos.coords.longitude.toFixed(5) };
+      geoOn = true; $("#geoState").innerHTML = "<b>on</b>";
+    },
+    () => toast("Location permission denied.", true)
+  );
+  if (!navigator.geolocation) toast("Geolocation unsupported.", true);
+});
+
+let toastTimer;
+function toast(msg, isErr) {
+  document.querySelectorAll(".toast").forEach((t) => t.remove());
+  const el = document.createElement("div");
+  el.className = "toast" + (isErr ? " err" : "");
+  el.textContent = msg;
+  document.body.appendChild(el);
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.remove(), 4000);
+}
+
+/* deep-link: /#SCQR1....  */
+if (location.hash.startsWith("#SCQR1")) handlePayload(decodeURIComponent(location.hash.slice(1)));
+</script>
+</body>
+</html>
