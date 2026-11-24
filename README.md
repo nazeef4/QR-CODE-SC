@@ -16,6 +16,8 @@ This repository contains both deliverables of the engagement:
 
 ## Quick start
 
+**Linux / macOS:**
+
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install fastapi "uvicorn[standard]" sqlalchemy cryptography \
@@ -24,6 +26,33 @@ python3 -m venv .venv
 .venv/bin/python -m pytest backend/tests -q     # 19 tests: crypto, hierarchy, RBAC, clone detection
 .venv/bin/python scripts/seed_demo.py           # demo tenant + 12 QR PNGs + scripted attack transcript
 .venv/bin/uvicorn backend.app.main:app --host 0.0.0.0 --port 8080
+```
+
+**Windows (cmd)** — requires Python 3.11+ from [python.org](https://python.org/downloads/)
+(tick *“Add python.exe to PATH”*) or `winget install Python.Python.3.12`.
+Note: Windows keeps venv tools in `.venv\Scripts\`, not `.venv\bin\`:
+
+```bat
+cd /d <path-to-repo>
+
+py -3 -m venv .venv
+.venv\Scripts\python -m pip install --upgrade pip
+.venv\Scripts\python -m pip install fastapi "uvicorn[standard]" sqlalchemy cryptography qrcode pillow pytest httpx pyjwt email-validator
+
+.venv\Scripts\python -m pytest backend\tests -q
+.venv\Scripts\python scripts\seed_demo.py
+.venv\Scripts\uvicorn backend.app.main:app --host 0.0.0.0 --port 8080
+```
+
+**Windows (PowerShell)** — same commands with `.\` prefixes:
+
+```powershell
+py -3 -m venv .venv
+.\.venv\Scripts\python -m pip install --upgrade pip
+.\.venv\Scripts\python -m pip install fastapi "uvicorn[standard]" sqlalchemy cryptography qrcode pillow pytest httpx pyjwt email-validator
+.\.venv\Scripts\python -m pytest backend\tests -q
+.\.venv\Scripts\python scripts\seed_demo.py
+.\.venv\Scripts\uvicorn backend.app.main:app --host 0.0.0.0 --port 8080
 ```
 
 - **Consumer scanner:** `http://localhost:8080/` — camera QR verification (or paste a
